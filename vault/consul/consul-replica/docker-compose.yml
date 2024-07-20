@@ -1,0 +1,101 @@
+version: '3.7'
+
+services:
+  consul1:
+    image: hashicorp/consul:latest
+    container_name: consul1
+    ports:
+      - "8500:8500"
+    command: agent -server -bootstrap-expect=3 -ui -client=0.0.0.0 -retry-join=consul2 -retry-join=consul3
+    networks:
+      - consul_net
+
+  consul2:
+    image: hashicorp/consul:latest
+    container_name: consul2
+    ports:
+      - "8501:8500"
+    command: agent -server -ui -client=0.0.0.0 -retry-join=consul1 -retry-join=consul3
+    depends_on:
+      - consul1
+    networks:
+      - consul_net
+
+  consul3:
+    image: hashicorp/consul:latest
+    container_name: consul3
+    ports:
+      - "8502:8500"
+    command: agent -server -ui -client=0.0.0.0 -retry-join=consul1 -retry-join=consul2
+    depends_on:
+      - consul1
+      - consul2
+    networks:
+      - consul_net
+
+  vault1:
+    image: hashicorp/vault:latest
+    container_name: vault1
+    environment:
+      VAULT_ADDR: http://0.0.0.0:8200
+    volumes:
+      - vault-data:/vault/data
+      - ./vault-config:/vault/config
+    ports:
+      - "8200:8200"
+    entrypoint: ["vault", "server", "-config=/vault/config/vault1-config.hcl"]
+    cap_add:
+      - IPC_LOCK
+    depends_on:
+      - consul1
+      - consul2
+      - consul3
+    networks:
+      - consul_net
+
+  vault2:
+    image: hashicorp/vault:latest
+    container_name: vault2
+    environment:
+      VAULT_ADDR: http://0.0.0.0:8200
+    volumes:
+      - vault-data2:/vault/data
+      - ./vault-config:/vault/config
+    ports:
+      - "8201:8200"
+    entrypoint: ["vault", "server", "-config=/vault/config/vault2-config.hcl"]
+    cap_add:
+      - IPC_LOCK
+    depends_on:
+      - consul1
+      - consul2
+      - consul3
+    networks:
+      - consul_net
+
+  vault-init:
+    image: hashicorp/vault:latest
+    container_name: vault-init
+    depends_on:
+      - vault1
+      - vault2
+    entrypoint: ["/vault/config/init-vault.sh"]
+    environment:
+      VAULT_ADDR: http://vault1:8200
+      VAULT_USER: ${VAULT_USER}
+      VAULT_PASSWORD: ${VAULT_PASSWORD}
+      VAULT_DEFAULT_TOKEN: ${VAULT_DEFAULT_TOKEN}
+    volumes:
+      - ./vault-config:/vault/config
+      - vault-data:/vault/data
+      - vault-data2:/vault/data2
+    networks:
+      - consul_net
+
+networks:
+  consul_net:
+    driver: bridge
+
+volumes:
+  vault-data:
+  vault-data2:
