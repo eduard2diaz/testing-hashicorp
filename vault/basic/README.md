@@ -18,15 +18,14 @@ version: '3.7'
 services:
   vault:
     image: hashicorp/vault:latest
-    container_name: vault
+    container_name: ${VAULT_CONTAINER_NAME:-vault}
     environment:
       VAULT_ADDR: http://0.0.0.0:8200
-      VAULT_DEV_ROOT_TOKEN_ID: root_token
     volumes:
+      - vault-data:/vault/data
       - ./vault-config:/vault/config
-      - ./vault-data:/vault/data
     ports:
-      - "8200:8200"
+      - "${VAULT_EXTERNAL_PORT:-8200}:8200"
     entrypoint: ["vault", "server", "-config=/vault/config/vault-config.hcl"]
     cap_add:
       - IPC_LOCK
@@ -39,9 +38,14 @@ services:
     entrypoint: ["/vault/config/init-vault.sh"]
     environment:
       VAULT_ADDR: http://vault:8200
+      VAULT_USER: ${VAULT_USER}
+      VAULT_PASSWORD: ${VAULT_PASSWORD}
+      VAULT_DEFAULT_TOKEN: ${VAULT_DEFAULT_TOKEN}
     volumes:
       - ./vault-config:/vault/config
-      - ./vault-data:/vault/data
+      - vault-data:/vault/data
+volumes:
+  vault-data:
 ```
 
 ### `vault-config/vault-config.hcl`
@@ -80,33 +84,68 @@ path "sys/mounts/*" {
 ```sh
 #!/bin/sh
 
-# Esperar a que Vault esté listo
+# Wait for Vault to be ready
 while ! nc -z vault 8200; do
   sleep 1
 done
 
-# Inicializar Vault
+# Initialize Vault
+init () {
 vault operator init > /vault/data/init.txt
+}
 
-# Desellarlo
+# Unseal Vault
+unseal () {
+# Imprimir las claves de des-sellado y el token de root
+echo "Claves de des-sellado y token de root:"
+cat /vault/data/init.txt
+
 vault operator unseal $(grep 'Key 1:' /vault/data/init.txt | awk '{print $NF}')
 vault operator unseal $(grep 'Key 2:' /vault/data/init.txt | awk '{print $NF}')
 vault operator unseal $(grep 'Key 3:' /vault/data/init.txt | awk '{print $NF}')
+}
 
-# Iniciar sesión con el token root
+# Log in with the root token
+log_in () {
 VAULT_TOKEN=$(grep 'Initial Root Token:' /vault/data/init.txt | awk '{print $NF}')
 vault login $VAULT_TOKEN
+}
 
-# Habilitar el motor de secretos KV
-vault secrets enable -path=kv kv
+create_default_token () {
+  if [ ! -z "$VAULT_DEFAULT_TOKEN" ]; then
+    echo "Creando default token"
+    vault token create -id $VAULT_DEFAULT_TOKEN
+  fi
+}
 
-# Escribir las políticas
+enable_secrets () {
+# Enable the KV secrets engine
+#vault secrets enable -path=kv kv
+
+# Enable the KV secrets engine for 'secret/' path (using v2, which is compatible with spring boot)
+vault secrets enable -path=secret kv-v2
+
+# Write the policies
+vault policy write user-policy /vault/config/user-policy.hcl
 vault policy write kv-access /vault/config/kv-access.hcl
 vault policy write list-secrets-engines /vault/config/list-secrets-engines.hcl
 
-# Habilitar autenticación userpass y crear un usuario
+# Enable userpass authentication and create a user
 vault auth enable userpass
-vault write auth/userpass/users/my-username password=my-password policies=default,list-secrets-engines,kv-access
+vault write auth/userpass/users/$VAULT_USER password=$VAULT_PASSWORD policies=default,list-secrets-engines,kv-access,user-policy
+}
+
+if [ -s /vault/data/init.txt ]; then
+   unseal
+else
+   init
+   unseal
+   log_in
+   create_default_token
+   enable_secrets
+fi
+
+vault status > /vault/file/status
 ```
 
 ## Instrucciones para ejecutar
