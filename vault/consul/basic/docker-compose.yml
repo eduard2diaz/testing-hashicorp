@@ -1,0 +1,40 @@
+version: '3.7'
+
+services:
+  consul:
+    image: hashicorp/consul:latest
+    container_name: consul
+    ports:
+      - "8500:8500"
+    command: agent -server -bootstrap -ui -client=0.0.0.0
+
+  vault:
+    image: hashicorp/vault:latest
+    container_name: ${VAULT_CONTAINER_NAME:-vault}
+    environment:
+      VAULT_ADDR: http://0.0.0.0:8200
+    volumes:
+      - vault-data:/vault/data
+      - ./vault-config:/vault/config
+    ports:
+      - "${VAULT_EXTERNAL_PORT:-8200}:8200"
+    entrypoint: ["vault", "server", "-config=/vault/config/vault-config.hcl"]
+    cap_add:
+      - IPC_LOCK
+
+  vault-init:
+    image: hashicorp/vault:latest
+    container_name: vault-init
+    depends_on:
+      - vault
+    entrypoint: ["/vault/config/init-vault.sh"]
+    environment:
+      VAULT_ADDR: http://vault:8200
+      VAULT_USER: ${VAULT_USER}
+      VAULT_PASSWORD: ${VAULT_PASSWORD}
+      VAULT_DEFAULT_TOKEN: ${VAULT_DEFAULT_TOKEN}
+    volumes:
+      - ./vault-config:/vault/config
+      - vault-data:/vault/data
+volumes:
+  vault-data:
