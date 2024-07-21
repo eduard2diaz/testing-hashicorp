@@ -1,5 +1,5 @@
 storage "consul" {
-  address = "http://consul1:8500"
+  address = "http://haproxy:8500"
   path    = "vault/"
 }
 

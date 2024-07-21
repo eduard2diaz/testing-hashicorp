@@ -1,37 +1,43 @@
 version: '3.7'
 
 services:
+  haproxy:
+    image: haproxy:latest
+    container_name: haproxy
+    volumes:
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg
+    ports:
+      - "8500:8500"
+    depends_on:
+      - consul1
+      - consul2
+      - consul3
+
   consul1:
     image: hashicorp/consul:latest
     container_name: consul1
     ports:
-      - "8500:8500"
+      - "8501:8500"
     command: agent -server -bootstrap-expect=3 -ui -client=0.0.0.0 -retry-join=consul2 -retry-join=consul3
-    networks:
-      - consul_net
 
   consul2:
     image: hashicorp/consul:latest
     container_name: consul2
     ports:
-      - "8501:8500"
+      - "8502:8500"
     command: agent -server -ui -client=0.0.0.0 -retry-join=consul1 -retry-join=consul3
     depends_on:
       - consul1
-    networks:
-      - consul_net
 
   consul3:
     image: hashicorp/consul:latest
     container_name: consul3
     ports:
-      - "8502:8500"
+      - "8503:8500"
     command: agent -server -ui -client=0.0.0.0 -retry-join=consul1 -retry-join=consul2
     depends_on:
       - consul1
       - consul2
-    networks:
-      - consul_net
 
   vault1:
     image: hashicorp/vault:latest
@@ -47,11 +53,7 @@ services:
     cap_add:
       - IPC_LOCK
     depends_on:
-      - consul1
-      - consul2
-      - consul3
-    networks:
-      - consul_net
+      - haproxy
 
   vault2:
     image: hashicorp/vault:latest
@@ -67,11 +69,7 @@ services:
     cap_add:
       - IPC_LOCK
     depends_on:
-      - consul1
-      - consul2
-      - consul3
-    networks:
-      - consul_net
+      - haproxy
 
   vault-init:
     image: hashicorp/vault:latest
@@ -89,12 +87,6 @@ services:
       - ./vault-config:/vault/config
       - vault-data:/vault/data
       - vault-data2:/vault/data2
-    networks:
-      - consul_net
-
-networks:
-  consul_net:
-    driver: bridge
 
 volumes:
   vault-data:
